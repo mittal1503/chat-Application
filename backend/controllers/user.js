@@ -1,101 +1,83 @@
-const {PrismaClient} = require("@prisma/client")
-const Prisma  = new PrismaClient();
+const { PrismaClient } = require("@prisma/client");
+const Prisma = new PrismaClient();
 const bcrypt = require("bcrypt");
-const crypto = require("crypto");
-const mailer = require("../utils/email")
+const jwt = require("jsonwebtoken");
+const User = require("../models/userModel");
+const asycnHandler = require("express-async-handler");
 
+const registerUser = asycnHandler(async (req, res) => {
+  const { firstname, lastname, email, password, emailVerified, image } =
+    req.body;
+  try {
+    const presetuser = await User.findOne({ email: email });
+    const user = {
+      firstname,
+      lastname,
+      email,
+      password,
+      image,
+    };
+    if (presetuser)
+      res.send({ error_message: "User already exist with this Email" });
+    else {
+      const newUser = await User.create(user);
+      //   if (newUser) {
+      //     const token = await Prisma.token.create({
+      //       data: {
+      //         token: crypto.randomBytes(20).toString("hex"),
+      //         userId: newUser.id,
+      //       },
+      //     });
+      //     mailer(
+      //       newUser.email,
+      //       `${process.env.EMAIL_VERIFICATION_URL}?token=${token.token}&id=${newUser.id}`
+      //     );
 
-const registerUser = async(req,res)=>{
-    console.log("calling in registrationn")
-    const {firstname,lastname,role,email,password,emailVerified} = req.body;
-    try{
-       const result = await Prisma.user.deleteMany();
-        const saltRound = 10;
-        const hashpassword = await bcrypt.hash(password, saltRound);
-        const user = {
-            firstname,
-            lastname,
-            email,
-            password:  hashpassword,
-            emailVerified,
-            role
-        }
-        const presetuser  = await Prisma.user.findUnique({
-            where:{
-                email:email
-            }
-        });
-        if(presetuser)
-           res.send({error_message:"User already exist with this Email"})
-        
-        else{
-            const newUser = await Prisma.user.create({ data: user })
-            if(newUser)
-            {
-                const token = await Prisma.token.create({
-                    data: {
-                        token: crypto.randomBytes(20).toString('hex'),
-                        userId:newUser.id
-                    }
-                })
-                 mailer(
-                   newUser.email,
-                   `${process.env.EMAIL_VERIFICATION_URL}?token=${token.token}&id=${newUser.id}`
-                 );
-        
-                res.send({newuser:newUser,message:"Sent mail and User registered successfully ",token:token})
-            }
-           
-        }
-        
+      //   }
+      res.send({
+        newuser: {
+          firstname: newUser.firstname,
+          lastname: newUser.lastname,
+          email: newUser.email,
+          image: newUser.image,
+          JwtToken: jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET),
+        },
+
+        message: "User registered successfully",
+      });
     }
-    catch(err)
-    {
-        console.log("error",err)
-        res.send({err:err})
+  } catch (err) {
+    console.log("error", err);
+    res.send({ err: err });
+  }
+});
+const loginUser = asycnHandler(async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const user = await User.findOne({ email: email });
+    console.log("user", user);
+    if (!user) res.send({ error_message: "User not found" });
+    // else if (!user.emailVerified)
+    //   res.send({ error_message: "Please verify your email For login" });
+    else {
+      if (user && !(await user.matchPassword(password))) {
+        res.send({ error_message: "Invalid password" });
+      } else {
+        const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
+        console.log("token", token, "userid", user._id);
+        const update_user = await User.findOneAndUpdate(
+          { email: email },
+          { jwtToken: token },
+          { new: true }
+        );
+
+        res.send({ message: "User found", user: update_user });
+      }
     }
-}
-const loginUser = async(req,res)=>{
-    const{email,password} = req.body;
-   try{
-       const user = await Prisma.user.findUnique({
-           where:{
-               email:email,
-           }
-       })
-      
-       if(!user)
-        res.send({error_message: "User not found"})
-       else if(user.role != 'ADMIN')
-        res.send({ error_message: "You are not allowed to login from here" });
-       else if(!user.emailVerified)
-        res.send({error_message:"Please verify your email For login"})
-       
-       else{
-           const isMatch = await bcrypt.compare(password,user.password);
-           if(!isMatch)
-           {
-               res.send({error_message:"Invalid password"})
-           }
-           else{
-               const update_user = await Prisma.user.update({
-                where:{
-                    email:email
-                },
-                data:{
-                    emailVerified:true
-                }
-               })
-               res.send({message:"User found",user:update_user})
-           }
-       }
+  } catch (err) {
+    console.log("error", err);
+    res.send({ err: err });
+  }
+});
 
-   }catch(err)
-   {
-     console.log("error",err)
-     res.send({err:err})
-   }
-} 
-
-module.exports = {registerUser,loginUser}
-
+module.exports = { registerUser, loginUser };
